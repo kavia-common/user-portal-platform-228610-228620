@@ -5,11 +5,14 @@ import { gatewayRefresh } from './gatewayClient';
  * - attaches Authorization: Bearer <accessToken> when available
  * - on 401, calls Gateway /auth/refresh once to get a new access token, then retries once
  *
- * The refresh request assumes a secure server-side refresh token (e.g., HTTP-only cookie).
+ * Refresh token strategy:
+ * - frontend stores refreshToken in-memory and provides it to this function
+ * - refresh endpoint returns rotated refreshToken; we update it if provided
  */
 
 function normalizeError(res, data) {
-  const message = (data && (data.message || data.error)) ? (data.message || data.error) : `Request failed (${res.status})`;
+  const message =
+    data && (data.message || data.error) ? data.message || data.error : `Request failed (${res.status})`;
   const err = new Error(message);
   err.status = res.status;
   err.data = data;
@@ -20,13 +23,15 @@ function normalizeError(res, data) {
 // This prevents "refresh stampede" if multiple requests 401 at once.
 let inFlightRefreshPromise = null;
 
-async function refreshAccessTokenSingleFlight() {
+async function refreshAccessTokenSingleFlight({ refreshToken }) {
   if (!inFlightRefreshPromise) {
     inFlightRefreshPromise = (async () => {
       try {
-        const refreshData = await gatewayRefresh();
-        const newToken = refreshData?.accessToken || refreshData?.token || null;
-        return newToken;
+        const refreshData = await gatewayRefresh({ refreshToken });
+        return {
+          accessToken: refreshData?.accessToken || refreshData?.token || null,
+          refreshToken: refreshData?.refreshToken || refreshToken || null,
+        };
       } finally {
         // Always clear so future refresh attempts can proceed.
         inFlightRefreshPromise = null;
@@ -45,6 +50,8 @@ export async function requestWithAuth({
   headers,
   accessToken,
   setAccessToken,
+  refreshToken,
+  setRefreshToken,
   retryOn401 = true,
   onAuthFailure,
 }) {
@@ -60,8 +67,8 @@ export async function requestWithAuth({
         ...(headers || {}),
       },
       body: body ? JSON.stringify(body) : undefined,
-      // Include cookies so refresh endpoints (often cookie-based) work cross-origin when configured.
-      credentials: 'include',
+      // Bearer-token architecture: do not rely on cookies/credentials.
+      credentials: 'omit',
     });
 
     const contentType = res.headers.get('content-type') || '';
@@ -78,12 +85,19 @@ export async function requestWithAuth({
   } catch (err) {
     if (err?.status !== 401 || !retryOn401) throw err;
 
+    if (!refreshToken) {
+      const authErr = new Error('Session expired. Please sign in again.');
+      authErr.status = 401;
+      authErr.authFailed = true;
+      if (typeof onAuthFailure === 'function') onAuthFailure(authErr);
+      throw authErr;
+    }
+
     // Refresh and retry once (single-flight across concurrent calls).
-    let newToken = null;
+    let refreshed = null;
     try {
-      newToken = await refreshAccessTokenSingleFlight();
+      refreshed = await refreshAccessTokenSingleFlight({ refreshToken });
     } catch (refreshErr) {
-      // If refresh itself fails, treat as unauthenticated.
       const authErr = new Error('Session expired. Please sign in again.');
       authErr.status = 401;
       authErr.cause = refreshErr;
@@ -92,12 +106,17 @@ export async function requestWithAuth({
       throw authErr;
     }
 
-    if (newToken && typeof setAccessToken === 'function') {
-      setAccessToken(newToken);
+    const newAccessToken = refreshed?.accessToken || null;
+    const newRefreshToken = refreshed?.refreshToken || refreshToken || null;
+
+    if (newRefreshToken && typeof setRefreshToken === 'function') {
+      setRefreshToken(newRefreshToken);
+    }
+    if (newAccessToken && typeof setAccessToken === 'function') {
+      setAccessToken(newAccessToken);
     }
 
-    if (!newToken) {
-      // No token obtained; treat as not authenticated.
+    if (!newAccessToken) {
       const authErr = new Error('Session expired. Please sign in again.');
       authErr.status = 401;
       authErr.authFailed = true;
@@ -106,7 +125,7 @@ export async function requestWithAuth({
     }
 
     try {
-      return await doFetch(newToken);
+      return await doFetch(newAccessToken);
     } catch (retryErr) {
       if (retryErr?.status === 401) {
         const authErr = new Error('Session expired. Please sign in again.');

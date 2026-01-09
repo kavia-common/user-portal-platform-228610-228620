@@ -34,8 +34,8 @@ async function request(path, options = {}) {
       'Content-Type': 'application/json',
       ...(options.headers || {}),
     },
-    // Needed for cookie-based refresh token strategies.
-    credentials: 'include',
+    // Bearer-token architecture: do not rely on cookies/credentials.
+    credentials: 'omit',
   });
 
   const contentType = res.headers.get('content-type') || '';
@@ -71,15 +71,21 @@ export async function gatewayLogin({ email, password }) {
 }
 
 // PUBLIC_INTERFACE
-export async function gatewayRefresh() {
-  /** Obtain a new access token using a server-side refresh token strategy. */
-  return request('/auth/refresh', { method: 'POST' });
+export async function gatewayRefresh({ refreshToken }) {
+  /** Obtain a new access token using the refresh token returned by the Gateway. */
+  return request('/auth/refresh', {
+    method: 'POST',
+    body: JSON.stringify({ refreshToken }),
+  });
 }
 
 // PUBLIC_INTERFACE
-export async function gatewayLogout() {
-  /** Logout via the Gateway. Also invalidates refresh token server-side if applicable. */
-  return request('/auth/logout', { method: 'POST' });
+export async function gatewayLogout({ refreshToken }) {
+  /** Logout via the Gateway by revoking the provided refresh token. */
+  return request('/auth/logout', {
+    method: 'POST',
+    body: JSON.stringify({ refreshToken }),
+  });
 }
 
 // PUBLIC_INTERFACE

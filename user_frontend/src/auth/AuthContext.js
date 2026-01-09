@@ -3,46 +3,50 @@ import { useNavigate } from 'react-router-dom';
 import { gatewayLogin, gatewayLogout, gatewayRefresh, gatewayRegister } from '../api/gatewayClient';
 
 /**
- * Note on refresh tokens:
- * - The refresh token is NOT stored in React/JS. It is assumed to be held server-side
- *   in a secure manner (e.g., HTTP-only cookie).
- * - The frontend calls POST /auth/refresh to obtain a new access token when needed.
+ * Note on refresh tokens (Bearer-token architecture):
+ * - The refresh token IS returned by the Gateway in the response body.
+ * - We keep it in-memory only (React state). It is not persisted to localStorage by default.
+ * - On page refresh, the user will need to log in again (acceptable for this step).
+ *
+ * If persistent sessions are desired later, implement secure storage and rotation strategy carefully.
  */
 
 const AuthContext = createContext(null);
 
 // PUBLIC_INTERFACE
 export function AuthProvider({ children }) {
-  /** Provides auth state (access token in memory) and auth actions to the React app. */
+  /** Provides auth state (access + refresh tokens in memory) and auth actions to the React app. */
   const navigate = useNavigate();
 
   const [accessToken, setAccessToken] = useState(null);
-  const [isHydrating, setIsHydrating] = useState(true);
+  const [refreshToken, setRefreshToken] = useState(null);
+  const [isHydrating, setIsHydrating] = useState(false);
 
   // Single-flight refresh to avoid multiple simultaneous refresh calls.
   const refreshPromiseRef = useRef(null);
 
-  const setToken = useCallback((token) => {
-    setAccessToken(token || null);
+  const setTokens = useCallback(({ access, refresh }) => {
+    setAccessToken(access || null);
+    setRefreshToken(refresh || null);
   }, []);
 
   const ensureAccessToken = useCallback(async () => {
-    // If we already have a token, nothing to do.
-    if (accessToken) {
-      setIsHydrating(false);
-      return accessToken;
-    }
+    if (accessToken) return accessToken;
 
-    // Attempt a refresh once during hydration / navigation into protected screens.
+    // If we do not have a refresh token, we cannot hydrate.
+    if (!refreshToken) return null;
+
     if (!refreshPromiseRef.current) {
+      setIsHydrating(true);
       refreshPromiseRef.current = (async () => {
         try {
-          const data = await gatewayRefresh();
-          const token = data?.accessToken || data?.token || null;
-          setToken(token);
-          return token;
+          const data = await gatewayRefresh({ refreshToken });
+          const newAccess = data?.accessToken || data?.token || null;
+          const newRefresh = data?.refreshToken || refreshToken || null; // rotation supported
+          setTokens({ access: newAccess, refresh: newRefresh });
+          return newAccess;
         } catch (e) {
-          setToken(null);
+          setTokens({ access: null, refresh: null });
           return null;
         } finally {
           setIsHydrating(false);
@@ -52,39 +56,54 @@ export function AuthProvider({ children }) {
     }
 
     return refreshPromiseRef.current;
-  }, [accessToken, setToken]);
+  }, [accessToken, refreshToken, setTokens]);
 
-  const login = useCallback(async ({ email, password }) => {
-    const data = await gatewayLogin({ email, password });
-    const token = data?.accessToken || data?.token;
-    if (!token) {
-      // Explicit error so UI can show a clear state if backend response is unexpected.
-      const err = new Error('Login succeeded but no access token was returned.');
-      err.status = 500;
-      throw err;
-    }
-    setToken(token);
-    setIsHydrating(false);
-    return data;
-  }, [setToken]);
+  const login = useCallback(
+    async ({ email, password }) => {
+      const data = await gatewayLogin({ email, password });
 
-  const register = useCallback(async ({ email, password }) => {
-    const data = await gatewayRegister({ email, password });
-    const token = data?.accessToken || data?.token;
-    // Some backends auto-login on register; support both behaviors.
-    if (token) setToken(token);
-    setIsHydrating(false);
-    return data;
-  }, [setToken]);
+      const newAccess = data?.accessToken || data?.token || null;
+      const newRefresh = data?.refreshToken || null;
+
+      if (!newAccess || !newRefresh) {
+        // Explicit error so UI can show a clear state if backend response is unexpected.
+        const err = new Error('Login succeeded but tokens were not returned.');
+        err.status = 500;
+        throw err;
+      }
+
+      setTokens({ access: newAccess, refresh: newRefresh });
+      return data;
+    },
+    [setTokens]
+  );
+
+  const register = useCallback(
+    async ({ email, password }) => {
+      const data = await gatewayRegister({ email, password });
+
+      // Gateway returns tokens on register in this architecture.
+      const newAccess = data?.accessToken || data?.token || null;
+      const newRefresh = data?.refreshToken || null;
+
+      if (newAccess && newRefresh) {
+        setTokens({ access: newAccess, refresh: newRefresh });
+      }
+
+      return data;
+    },
+    [setTokens]
+  );
 
   const logout = useCallback(async () => {
     try {
-      await gatewayLogout();
+      if (refreshToken) {
+        await gatewayLogout({ refreshToken });
+      }
     } finally {
-      setToken(null);
-      setIsHydrating(false);
+      setTokens({ access: null, refresh: null });
     }
-  }, [setToken]);
+  }, [refreshToken, setTokens]);
 
   const logoutAndRedirect = useCallback(async () => {
     try {
@@ -94,16 +113,20 @@ export function AuthProvider({ children }) {
     }
   }, [logout, navigate]);
 
-  const value = useMemo(() => ({
-    accessToken,
-    isHydrating,
-    setAccessToken: setToken,
-    ensureAccessToken,
-    login,
-    register,
-    logout,
-    logoutAndRedirect,
-  }), [accessToken, ensureAccessToken, isHydrating, login, logout, logoutAndRedirect, register, setToken]);
+  const value = useMemo(
+    () => ({
+      accessToken,
+      refreshToken,
+      isHydrating,
+      setAccessToken: (t) => setTokens({ access: t, refresh: refreshToken }),
+      ensureAccessToken,
+      login,
+      register,
+      logout,
+      logoutAndRedirect,
+    }),
+    [accessToken, ensureAccessToken, isHydrating, login, logout, logoutAndRedirect, refreshToken, register, refreshToken, setTokens]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

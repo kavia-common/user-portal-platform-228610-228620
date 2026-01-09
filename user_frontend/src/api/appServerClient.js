@@ -14,7 +14,7 @@ function requireEnv(name, value) {
 }
 
 // PUBLIC_INTERFACE
-export async function appMe({ accessToken, setAccessToken }) {
+export async function appMe({ accessToken, setAccessToken, refreshToken, setRefreshToken }) {
   /** Fetch current user from the App Server (requires Authorization Bearer). */
   requireEnv('REACT_APP_BACKEND_URL (or legacy REACT_APP_APP_SERVER_BASE_URL)', APP_SERVER_BASE_URL);
   return requestWithAuth({
@@ -23,11 +23,13 @@ export async function appMe({ accessToken, setAccessToken }) {
     method: 'GET',
     accessToken,
     setAccessToken,
+    refreshToken,
+    setRefreshToken,
   });
 }
 
 // PUBLIC_INTERFACE
-export async function appHome({ accessToken, setAccessToken }) {
+export async function appHome({ accessToken, setAccessToken, refreshToken, setRefreshToken }) {
   /** Fetch personalized home content from the App Server (requires Authorization Bearer). */
   requireEnv('REACT_APP_BACKEND_URL (or legacy REACT_APP_APP_SERVER_BASE_URL)', APP_SERVER_BASE_URL);
   return requestWithAuth({
@@ -36,5 +38,7 @@ export async function appHome({ accessToken, setAccessToken }) {
     method: 'GET',
     accessToken,
     setAccessToken,
+    refreshToken,
+    setRefreshToken,
   });
 }
