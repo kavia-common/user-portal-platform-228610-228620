@@ -1,6 +1,11 @@
 import { requestWithAuth } from './requestWithAuth';
 
-const APP_SERVER_BASE_URL = process.env.REACT_APP_APP_SERVER_BASE_URL;
+/**
+ * Environment variable normalization:
+ * - Container env list defines REACT_APP_BACKEND_URL for the Application Server.
+ * - Keep backwards compatibility with older REACT_APP_APP_SERVER_BASE_URL if present.
+ */
+const APP_SERVER_BASE_URL = process.env.REACT_APP_BACKEND_URL || process.env.REACT_APP_APP_SERVER_BASE_URL;
 
 function requireEnv(name, value) {
   if (!value) {
@@ -11,7 +16,7 @@ function requireEnv(name, value) {
 // PUBLIC_INTERFACE
 export async function appMe({ accessToken, setAccessToken }) {
   /** Fetch current user from the App Server (requires Authorization Bearer). */
-  requireEnv('REACT_APP_APP_SERVER_BASE_URL', APP_SERVER_BASE_URL);
+  requireEnv('REACT_APP_BACKEND_URL (or legacy REACT_APP_APP_SERVER_BASE_URL)', APP_SERVER_BASE_URL);
   return requestWithAuth({
     baseUrl: APP_SERVER_BASE_URL,
     path: '/me',

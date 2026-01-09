@@ -10,7 +10,12 @@
  * - GET  /health
  */
 
-const GATEWAY_BASE_URL = process.env.REACT_APP_GATEWAY_BASE_URL;
+/**
+ * Environment variable normalization:
+ * - Container env list defines REACT_APP_API_BASE for the API Gateway.
+ * - Keep backwards compatibility with older REACT_APP_GATEWAY_BASE_URL if present.
+ */
+const GATEWAY_BASE_URL = process.env.REACT_APP_API_BASE || process.env.REACT_APP_GATEWAY_BASE_URL;
 
 function requireEnv(name, value) {
   if (!value) {
@@ -21,7 +26,7 @@ function requireEnv(name, value) {
 }
 
 async function request(path, options = {}) {
-  requireEnv('REACT_APP_GATEWAY_BASE_URL', GATEWAY_BASE_URL);
+  requireEnv('REACT_APP_API_BASE (or legacy REACT_APP_GATEWAY_BASE_URL)', GATEWAY_BASE_URL);
 
   const res = await fetch(`${GATEWAY_BASE_URL}${path}`, {
     ...options,

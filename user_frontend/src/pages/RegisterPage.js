@@ -35,9 +35,12 @@ export default function RegisterPage() {
 
     setSubmitting(true);
     try {
-      await register({ email, password });
-      // If the backend doesn't auto-login on register, user can log in next.
-      navigate('/home', { replace: true });
+      const data = await register({ email, password });
+      const token = data?.accessToken || data?.token || null;
+
+      // If register returned a token (auto-login), go straight to /home.
+      // Otherwise, send user to /login to complete authentication.
+      navigate(token ? '/home' : '/login', { replace: true });
     } catch (err) {
       setFormError(err.message || 'Registration failed');
     } finally {
