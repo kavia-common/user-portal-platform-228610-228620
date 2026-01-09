@@ -17,15 +17,12 @@ const theme = {
 };
 
 function AppShell({ children }) {
-  const { accessToken, logout } = useAuth();
+  const { accessToken, logoutAndRedirect } = useAuth();
   const navigate = useNavigate();
 
   async function onLogout() {
-    try {
-      await logout();
-    } finally {
-      navigate('/login', { replace: true });
-    }
+    // Keep the UI responsive: always land on /login after logout.
+    await logoutAndRedirect();
   }
 
   return (

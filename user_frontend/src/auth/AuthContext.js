@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { gatewayLogin, gatewayLogout, gatewayRefresh, gatewayRegister } from '../api/gatewayClient';
 
 /**
@@ -13,6 +14,8 @@ const AuthContext = createContext(null);
 // PUBLIC_INTERFACE
 export function AuthProvider({ children }) {
   /** Provides auth state (access token in memory) and auth actions to the React app. */
+  const navigate = useNavigate();
+
   const [accessToken, setAccessToken] = useState(null);
   const [isHydrating, setIsHydrating] = useState(true);
 
@@ -54,6 +57,12 @@ export function AuthProvider({ children }) {
   const login = useCallback(async ({ email, password }) => {
     const data = await gatewayLogin({ email, password });
     const token = data?.accessToken || data?.token;
+    if (!token) {
+      // Explicit error so UI can show a clear state if backend response is unexpected.
+      const err = new Error('Login succeeded but no access token was returned.');
+      err.status = 500;
+      throw err;
+    }
     setToken(token);
     setIsHydrating(false);
     return data;
@@ -77,6 +86,14 @@ export function AuthProvider({ children }) {
     }
   }, [setToken]);
 
+  const logoutAndRedirect = useCallback(async () => {
+    try {
+      await logout();
+    } finally {
+      navigate('/login', { replace: true });
+    }
+  }, [logout, navigate]);
+
   const value = useMemo(() => ({
     accessToken,
     isHydrating,
@@ -85,7 +102,8 @@ export function AuthProvider({ children }) {
     login,
     register,
     logout,
-  }), [accessToken, ensureAccessToken, isHydrating, login, logout, register, setToken]);
+    logoutAndRedirect,
+  }), [accessToken, ensureAccessToken, isHydrating, login, logout, logoutAndRedirect, register, setToken]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -29,7 +29,7 @@ export async function appMe({ accessToken, setAccessToken }) {
 // PUBLIC_INTERFACE
 export async function appHome({ accessToken, setAccessToken }) {
   /** Fetch personalized home content from the App Server (requires Authorization Bearer). */
-  requireEnv('REACT_APP_APP_SERVER_BASE_URL', APP_SERVER_BASE_URL);
+  requireEnv('REACT_APP_BACKEND_URL (or legacy REACT_APP_APP_SERVER_BASE_URL)', APP_SERVER_BASE_URL);
   return requestWithAuth({
     baseUrl: APP_SERVER_BASE_URL,
     path: '/home',

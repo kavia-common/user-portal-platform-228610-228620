@@ -16,6 +16,26 @@ function normalizeError(res, data) {
   return err;
 }
 
+// Module-level single-flight refresh promise.
+// This prevents "refresh stampede" if multiple requests 401 at once.
+let inFlightRefreshPromise = null;
+
+async function refreshAccessTokenSingleFlight() {
+  if (!inFlightRefreshPromise) {
+    inFlightRefreshPromise = (async () => {
+      try {
+        const refreshData = await gatewayRefresh();
+        const newToken = refreshData?.accessToken || refreshData?.token || null;
+        return newToken;
+      } finally {
+        // Always clear so future refresh attempts can proceed.
+        inFlightRefreshPromise = null;
+      }
+    })();
+  }
+  return inFlightRefreshPromise;
+}
+
 // PUBLIC_INTERFACE
 export async function requestWithAuth({
   baseUrl,
@@ -26,6 +46,7 @@ export async function requestWithAuth({
   accessToken,
   setAccessToken,
   retryOn401 = true,
+  onAuthFailure,
 }) {
   /** Perform an HTTP request with optional JWT attachment and refresh-on-401 retry. */
   const url = `${baseUrl}${path}`;
@@ -57,9 +78,19 @@ export async function requestWithAuth({
   } catch (err) {
     if (err?.status !== 401 || !retryOn401) throw err;
 
-    // Refresh and retry once.
-    const refreshData = await gatewayRefresh();
-    const newToken = refreshData?.accessToken || refreshData?.token || null;
+    // Refresh and retry once (single-flight across concurrent calls).
+    let newToken = null;
+    try {
+      newToken = await refreshAccessTokenSingleFlight();
+    } catch (refreshErr) {
+      // If refresh itself fails, treat as unauthenticated.
+      const authErr = new Error('Session expired. Please sign in again.');
+      authErr.status = 401;
+      authErr.cause = refreshErr;
+      authErr.authFailed = true;
+      if (typeof onAuthFailure === 'function') onAuthFailure(authErr);
+      throw authErr;
+    }
 
     if (newToken && typeof setAccessToken === 'function') {
       setAccessToken(newToken);
@@ -67,9 +98,25 @@ export async function requestWithAuth({
 
     if (!newToken) {
       // No token obtained; treat as not authenticated.
-      throw err;
+      const authErr = new Error('Session expired. Please sign in again.');
+      authErr.status = 401;
+      authErr.authFailed = true;
+      if (typeof onAuthFailure === 'function') onAuthFailure(authErr);
+      throw authErr;
     }
 
-    return doFetch(newToken);
+    try {
+      return await doFetch(newToken);
+    } catch (retryErr) {
+      if (retryErr?.status === 401) {
+        const authErr = new Error('Session expired. Please sign in again.');
+        authErr.status = 401;
+        authErr.authFailed = true;
+        authErr.cause = retryErr;
+        if (typeof onAuthFailure === 'function') onAuthFailure(authErr);
+        throw authErr;
+      }
+      throw retryErr;
+    }
   }
 }

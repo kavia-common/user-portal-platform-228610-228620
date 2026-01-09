@@ -85,7 +85,7 @@ export async function gatewayLogout() {
 // PUBLIC_INTERFACE
 export async function gatewayHealth() {
   /** Check Gateway health. */
-  requireEnv('REACT_APP_GATEWAY_BASE_URL', GATEWAY_BASE_URL);
+  requireEnv('REACT_APP_API_BASE (or legacy REACT_APP_GATEWAY_BASE_URL)', GATEWAY_BASE_URL);
   const res = await fetch(`${GATEWAY_BASE_URL}/health`, { method: 'GET' });
   if (!res.ok) {
     const err = new Error(`Gateway health check failed (${res.status})`);

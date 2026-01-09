@@ -17,7 +17,7 @@ const theme = {
 export default function HomePage() {
   /** Protected home page: calls App Server /me and /home using JWT, with refresh-on-401 handled by the request wrapper. */
   const navigate = useNavigate();
-  const { accessToken, setAccessToken, logout } = useAuth();
+  const { accessToken, setAccessToken, logoutAndRedirect } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState(null);
@@ -44,8 +44,7 @@ export default function HomePage() {
         if (!mounted) return;
         if (err?.status === 401) {
           // If refresh + retry also failed, we should log out and bounce to login.
-          await logout();
-          navigate('/login', { replace: true });
+          await logoutAndRedirect();
           return;
         }
         setError(err.message || 'Failed to load home');
@@ -56,7 +55,7 @@ export default function HomePage() {
 
     load();
     return () => { mounted = false; };
-  }, [accessToken, logout, navigate, setAccessToken]);
+  }, [accessToken, logoutAndRedirect, navigate, setAccessToken]);
 
   return (
     <div style={{ maxWidth: 1060, margin: '0 auto', paddingBottom: 26 }}>
